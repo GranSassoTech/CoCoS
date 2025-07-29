@@ -1,0 +1,19 @@
+[diff]
+    tool = diffsitter
+
+[difftool]
+    prompt = false
+
+[difftool "diffsitter"]
+    cmd = ./diffsitter "$LOCAL" "$REMOTE"
+
+[difftool "difftastic"]
+    # See `man git-difftool` for a description of MERGED, LOCAL and REMOTE.
+    cmd = ./difft --display side-by-side-show-both --skip-unchanged --ignore-comments "$LOCAL" "$REMOTE"
+
+[pager]
+    # Use a pager if the difftool output is larger than one screenful,
+    # consistent with the behaviour of `git diff`.
+    difftool = true
+
+
