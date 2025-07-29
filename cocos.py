@@ -424,6 +424,36 @@ class CallGraphBuilder(NodeVisitor):
 		file_name = self.outputtofiles.get(lineno, '?')
 		
 		return (str(mapped_line), file_name)
+	
+
+def process_relations(printed, call_graph, f, direction, depth_arg):
+	"""
+	Helper function to process callers or callees relationships.
+	"""
+	if depth_arg == 0:
+		return printed
+	
+	is_unlimited = (depth_arg == -1)
+	current_depth = 1
+	
+	while True:
+		relations = get_related_functions(call_graph, [f], current_depth, direction)
+		new_relations = relations - printed
+		
+		if not new_relations:
+			break
+			
+		msg_type = "direct" if current_depth == 1 else "indirect"
+		direction_name = "caller" if direction == 'callers' else "callee"
+		print(f"{new_relations} ({msg_type} {direction_name}(s) of {f})")
+		printed.update(new_relations)
+		
+		if not is_unlimited and current_depth >= depth_arg:
+			break
+			
+		current_depth += 1
+	
+	return printed
 
 
 def main():
@@ -617,35 +647,11 @@ def main():
 			print(f + " (changed)")
 			printed.add(f)
 
-			def process_relations(direction, depth_arg):
-				if depth_arg == 0:
-					return
-
-				is_unlimited = (depth_arg == -1)
-				current_depth = 1
-
-				while True:
-					relations = get_related_functions(builder.call_graph, [f], current_depth, direction)
-					new_relations = relations - printed
-
-					if not new_relations:
-						break
-					
-					msg_type = "direct" if current_depth == 1 else "indirect"
-					direction_name = "caller" if direction == 'callers' else "callee"
-					print(f"{new_relations} ({msg_type} {direction_name}(s) of {f})")
-					printed.update(new_relations)
-
-					if not is_unlimited and current_depth >= depth_arg:
-						break
-					
-					current_depth += 1
-
-			# Process callers
-			process_relations('callers', args.caller_depth)
-
+			 # Process callers
+			printed = process_relations(printed, builder.call_graph, f, 'callers', args.caller_depth)
+	
 			# Process callees
-			process_relations('callees', args.callee_depth)
+			printed = process_relations(printed, builder.call_graph, f, 'callees', args.callee_depth)
 
 		changed_map[builder.inputfile] = builder.changed_func
 		save_dict_as_python_file(changed_map, "changed_map.py")
