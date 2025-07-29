@@ -22,6 +22,12 @@ run.py            Macro to run cocos.py on multiple files (component analysis)
 copyrepo.sh       creates copies of the given commit(s) to be analysed
 run.sh            Main script (performs full run)
 
+  * Dependencies *
+
+- Python 3
+- Git
+- (optional) GraphViz
+
 
   * Usage *
 

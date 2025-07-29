@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = 'CoCoS-0.1-2025.07.25'
+VERSION = 'CoCoS-0.1-2025.07.29'
 
 """ CoCoS - Continuous Compliance Service
 	File analysis script
@@ -8,7 +8,7 @@ Author:
 	Emerson Sales
 
 Assumptions:
-	- We are relying on the fact that CoCos is installed in the git root. 
+	- We are relying on the fact that CoCoS is installed in the git root. 
 	  This means that all analyzed files start with ../ 
 	  and thus, if we want to retrieve a file path, we remove the first three characters of the input name
 	- Programs do not have pointer aliasing on functions. 
@@ -17,13 +17,14 @@ Assumptions:
 	  (f -> g in the function call graph)
 	- Type qualifiers, type modifiers and types are treated equally when it comes to function signature change
 	  (e.g. although const doesn't change the type itself, if added in a new version of the code it will be flagged as a signature change.
-	   The same applies to modifiers such as short and, of course, to actual type changes such as from int to float)
+	   The same treatment applies to modifiers such as short and, of course, to actual type changes such as from int to float)
 	
 ToDos:
 	- Instead of saving old version on builder, create two different builders
 	- messages with possible plural (e.g. caller(s)) could instead be checked if it is singular or not
 	- General refactoring (many parts of the code can be converted into functions, 
 	  specially the ones that repeat twice with different parameters)
+	- Debug mode
 """
 import argparse
 import ast
@@ -71,38 +72,32 @@ def save_dict_as_python_file(data, output_path, var_name="file_func_map"):
 
 
 def save_change_log(file, new_tag, changed_map, removed_funcs, new_funcs, sig_changes):
+	"""
+	Save change log information to a file.
+	"""
 	output_path = "../.cocos_change_log"
-	skip_counter = 0
-	if file not in changed_map.keys(): 
-		changes = "{}"
-		skip_counter += 1
-	else: changes = changed_map[file]
-	if not removed_funcs: 
-		removed_funcs = "{}"
-		skip_counter += 1
-	if not new_funcs: 
-		new_funcs = "{}"
-		skip_counter += 1
-	if not sig_changes: 
-		sig_changes = "{}"
-		skip_counter += 1
-	if skip_counter==4:
-		print("no changes in the file, skipping log")
+	
+	# Process input data with defaults
+	changes = changed_map.get(file, "{}")
+	removed_funcs = "{}" if not removed_funcs else removed_funcs
+	new_funcs = "{}" if not new_funcs else new_funcs
+	sig_changes = "{}" if not sig_changes else sig_changes
+	
+	# Skip if no changes
+	if all(val == "{}" for val in [changes, removed_funcs, new_funcs, sig_changes]):
+		print("No changes in the file, skipping log")
 		return
-	# print("we're here")
-	if os.path.exists(output_path):
-		with open(output_path, 'r') as f:
-			content = f.read()
-		# print("and here")
-		with open(output_path, 'w') as f:
-			f.write(f"{content}\n")
-			# print(f"# {file[3:]} = {str(changes)},{str(removed_funcs)},{str(new_funcs)},{str(sig_changes)}")
-			f.write(f"# {file[3:]} = {str(changes)},{str(removed_funcs)},{str(new_funcs)},{str(sig_changes)}")
-			
-	else:
-		with open(output_path, 'w') as f:
+	
+	# Prepare log entry
+	file_display = file[3:]  # Remove first 3 characters from file path (we're assuming it starts with ../)
+	log_entry = f"# {file_display} = {changes},{removed_funcs},{new_funcs},{sig_changes}"
+	
+	# Write to file
+	mode = 'a' if os.path.exists(output_path) else 'w'
+	with open(output_path, mode) as f:
+		if mode == 'w':
 			f.write(f"### Auto-generated file for CoCoS analysis -- release {new_tag}\n")
-			f.write(f"# {file[3:]} = {str(changes)},{str(removed_funcs)},{str(new_funcs)},{str(sig_changes)}")
+		f.write(f"\n{log_entry}")
 
 
 def extract_func_params(ast):
@@ -117,13 +112,12 @@ def extract_func_params(ast):
 			coord = node.decl.coord
 			ret_type = node.decl
 			while hasattr(ret_type,'type'): 
-				# print(" 5555 %s " % (param_type))
 				if hasattr(ret_type.type, "names"): 
 					ret_type = ret_type.type.names
 					break
 				ret_type = ret_type.type
 			params = None
-			if isinstance(node.decl.type.args, pycparser.c_ast.ParamList): # TODO: double check if args position is always the same (might need some error treatment here)
+			if hasattr(node.decl.type, "args") and isinstance(node.decl.type.args, pycparser.c_ast.ParamList): # TODO: double check if args position is always the same (might need some error treatment here)
 				params = node.decl.type.args.params
 			func_param_map[func_name] = (params, coord, ret_type)
 
@@ -160,7 +154,7 @@ def ast_equal(node1, node2, ignore_coords=True):
 
 def extract_funcdefs(ast):
 	"""
-	Extracts all function definitions as a dict: name -> FuncDef node.
+	Extracts all function definitions as a dictionary in the form: <name> -> <FuncDef node>.
 	"""
 	funcdefs = {}
 
@@ -191,7 +185,7 @@ def invert_call_graph(call_graph):
 
 	Examples:
 		linemarkerinfo('# 1 "<built-in>" 1')		 -->  (1, '<built-in>', 1)
-		linemarkerinfo('# 1 "<stdin>"')			     -->  (1, '<stdin>', -1)
+		linemarkerinfo('# 1 "<stdin>"')				 -->  (1, '<stdin>', -1)
 		linemarkerinfo('# 1 "include/pthread.h" 2')  -->  (1, 'include/pthread.h', 2)
 
    (for a description of linemarkers see:
@@ -201,8 +195,6 @@ def invert_call_graph(call_graph):
 def linemarkerinfo(marker):
 	# linemarker format:  # LINENO FILE FLAG
 	# (note  FLAG  is not mandatory)
-	#
-	#print "MARKER: '%s'" % marker
 
 	line = marker
 
@@ -240,32 +232,26 @@ def printFileRows(filename):
 	return rows
 
 
-def get_callers(call_graph, roots, max_depth):
-	reverse = invert_call_graph(call_graph)
+# TODO: use this version when refactoring list of retesting functions
+def get_related_functions(call_graph, roots, max_depth, direction='callees'):
+	"""
+	Get either callers or callees of given roots in a call graph up to max_depth.
+	"""
+	graph = invert_call_graph(call_graph) if direction == 'callers' else call_graph
 	visited = set()
-	queue = deque([(r, 0) for r in roots])
+	queue = deque((r, 0) for r in roots)
+	
 	while queue:
 		node, depth = queue.popleft()
-		if max_depth!=-1 and depth >= max_depth:
+		if max_depth != -1 and depth >= max_depth:
 			continue
-		for parent in reverse.get(node, []):
-			if parent not in visited:
-				visited.add(parent)
-				queue.append((parent, depth + 1))
-	return visited
-
-
-def get_callees(call_graph, roots, max_depth):
-	visited = set()
-	queue = deque([(r, 0) for r in roots])
-	while queue:
-		node, depth = queue.popleft()
-		if max_depth!=-1 and depth >= max_depth:
-			continue
-		for child in call_graph.get(node, []):
-			if child not in visited:
-				visited.add(child)
-				queue.append((child, depth + 1))
+			
+		neighbors = graph.get(node, [])
+		for neighbor in neighbors:
+			if neighbor not in visited:
+				visited.add(neighbor)
+				queue.append((neighbor, depth + 1))
+				
 	return visited
 
 
@@ -304,7 +290,6 @@ class CallGraphBuilder(NodeVisitor):
 	
 
 	def visit_FuncDef(self, node):
-		# print("funcdef ")
 		func_name = node.decl.name
 		if self.newvisit:
 			self.funcdefs_new[func_name] = node
@@ -319,7 +304,6 @@ class CallGraphBuilder(NodeVisitor):
 		else:
 			self.funcdefs_old[func_name] = node
 			self.generic_visit(node)
-
 
 
 	def visit_FuncCall(self, node):
@@ -353,6 +337,7 @@ class CallGraphBuilder(NodeVisitor):
 				else:
 					print("line " + str(lineout) + " does not refer to actual change")
 		return super().visit(node) 
+
 
 	# adapted from CSeq (core.Merger)
 	def preprocess_and_run(self, inputfile, filepath, includepaths, showast=False): # TODO: split this functions in two
@@ -426,24 +411,19 @@ class CallGraphBuilder(NodeVisitor):
 			(?,?) if unable to map back.
 	'''
 	def map_line_to_input_file(self, lineno):
-		nextkey = 0
-		inputfile = ''
-
-		if lineno in self.outputtoinput:
-			firstkey = nextkey = lastkey = lineno
-
-			if nextkey in self.outputtoinput and nextkey != 0:
-				lastkey = nextkey
-				nextkey = self.outputtoinput[nextkey]
-			else:
-				nextkey = 0
-			if nextkey!=0 and lastkey in self.outputtofiles:
-				inputfile = self.outputtofiles[lastkey]
-
-		if nextkey == 0: nextkey = '?'
-		if inputfile == '': inputfile = '?'
-
-		return (nextkey, inputfile)
+		# Check if the line exists in the mapping
+		if lineno not in self.outputtoinput:
+			return ('?', '?')
+		
+		# Get the mapped line number
+		mapped_line = self.outputtoinput[lineno]
+		if mapped_line == 0:
+			return ('?', '?')
+		
+		# Get the corresponding file name if available
+		file_name = self.outputtofiles.get(lineno, '?')
+		
+		return (str(mapped_line), file_name)
 
 
 def main():
@@ -634,44 +614,39 @@ def main():
 		if lib_funcs!=builder.changed_func: print("functions changed: " + " ".join(builder.changed_func))
 		print("\n--- Functions that need retest are: ")
 		for f in builder.changed_func:
-			print(f+" (changed)")
-			reverse_graph = invert_call_graph(builder.call_graph)
+			print(f + " (changed)")
 			printed.add(f)
-			# navigate up the tree using the reverse graph
-			if f in reverse_graph.keys() and args.caller_depth>0:
-				retest_set.update(reverse_graph[f])
-				depth_up += 1
-				msg = " (direct caller(s) of %s)" % f 
-				if bool(retest_set.difference(printed)): print(str(retest_set.difference(printed)) + msg)
-				printed.update(retest_set)
-				while depth_up<args.caller_depth:
-					for ff in retest_set:
-						if ff in reverse_graph.keys() and bool(reverse_graph[ff].difference(printed)):
-							msg = " (indirect caller(s) of %s)" % f 
-							print(str(reverse_graph[ff].difference(printed)) + msg)
-							printed.update(reverse_graph[ff])
-							next_retest_set.update(reverse_graph[ff])
-					retest_set = next_retest_set.copy()
-					depth_up += 1
-					next_retest_set.clear()
-			retest_set.clear() # clear set to use it for callees now
-			# navigate down the tree
-			if f in builder.call_graph.keys() and args.callee_depth>0:
-				retest_set.update(builder.call_graph[f])
-				depth_down += 1
-				msg = " (direct callee(s) of %s)" % f 
-				if bool(retest_set.difference(printed)): print(str(retest_set.difference(printed)) + msg)
-				printed.update(retest_set)
-				while depth_down<args.callee_depth:
-					for ff in retest_set:
-						if ff in builder.call_graph.keys() and bool(builder.call_graph[ff].difference(printed)):
-							msg = " (indirect callee(s) of %s)" % f 
-							print(str(builder.call_graph[ff].difference(printed)) + msg) 
-							printed.update(builder.call_graph)
-							next_retest_set.update(builder.call_graph[ff])
-					retest_set = next_retest_set.copy()
-					depth_down += 1
-					next_retest_set.clear()
+
+			def process_relations(direction, depth_arg):
+				if depth_arg == 0:
+					return
+
+				is_unlimited = (depth_arg == -1)
+				current_depth = 1
+
+				while True:
+					relations = get_related_functions(builder.call_graph, [f], current_depth, direction)
+					new_relations = relations - printed
+
+					if not new_relations:
+						break
+					
+					msg_type = "direct" if current_depth == 1 else "indirect"
+					direction_name = "caller" if direction == 'callers' else "callee"
+					print(f"{new_relations} ({msg_type} {direction_name}(s) of {f})")
+					printed.update(new_relations)
+
+					if not is_unlimited and current_depth >= depth_arg:
+						break
+					
+					current_depth += 1
+
+			# Process callers
+			process_relations('callers', args.caller_depth)
+
+			# Process callees
+			process_relations('callees', args.callee_depth)
+
 		changed_map[builder.inputfile] = builder.changed_func
 		save_dict_as_python_file(changed_map, "changed_map.py")
 	else:
