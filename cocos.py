@@ -20,11 +20,11 @@ Assumptions:
 	   The same treatment applies to modifiers such as short and, of course, to actual type changes such as from int to float)
 	
 ToDos:
-	- Instead of saving old version on builder, create two different builders
-	- messages with possible plural (e.g. caller(s)) could instead be checked if it is singular or not
+	- Messages with possible plural (e.g. caller(s)) could instead be checked if it is singular or not
 	- General refactoring (many parts of the code can be converted into functions, 
 	  specially the ones that repeat twice with different parameters)
 	- Debug mode
+	- Add option to show version and exit
 """
 import argparse
 import ast
@@ -271,28 +271,31 @@ def save_call_graph_to_dot(call_graph, output_path="callgraph.dot"):
 
 
 class CallGraphBuilder(NodeVisitor):
-	inputtooutput = {}		# input lines to output lines
-	outputtoinput = {}		# output lines to input lines
-	outputtofiles = {}		# output lines to input file names
-	call_graph = {}         # function_name -> [callee_name, ...]
-	call_nodes = {}         # (caller, callee) -> FuncCall node(s)
-	funcdefs_new = {}	    # function_name -> FuncDef node
-	funcdefs_old = {}	    # function_name -> FuncDef node
-	newvisit = False
-	params = set()
-	current_func = None
-	prev_func = None
-	target_lines = set()
-	changed_func = set()
-	new_funcs = set()
-	removed_funcs = set()
-	inputfile = ''
+	def __init__(self):
+		self.inputtooutput = {}
+		self.outputtoinput = {}
+		self.outputtofiles = {}
+		self.call_graph = {}          # <function name> -> [callee_name, ...]
+		self.call_nodes = {}          # (caller, callee) -> <FuncCall node(s)>
+		self.funcdefs = {}            # <function name> -> <FuncDef node>
+		self.newvisit = False         # if True, make full computations (most recent file only)
+		self.current_func = None      # current function scope
+		self.prev_func = None         # current outer scope
+		self.target_lines = set()     # set of lines with semantic changes 
+		self.changed_func = set()     # set of functions with semantic changes
+		self.new_funcs = set()        # set of new functions
+		self.removed_funcs = set()    # set of removed functions
+		self.inputfile = ''           # name of the C file
+
+		self.markedoutput = ''
+		self.output = ''
+		self.lastoutputlineno = 0
 	
 
 	def visit_FuncDef(self, node):
 		func_name = node.decl.name
+		self.funcdefs[func_name] = node
 		if self.newvisit:
-			self.funcdefs_new[func_name] = node
 
 			self.prev_func = self.current_func
 			self.current_func = func_name
@@ -302,7 +305,6 @@ class CallGraphBuilder(NodeVisitor):
 
 			self.current_func = self.prev_func
 		else:
-			self.funcdefs_old[func_name] = node
 			self.generic_visit(node)
 
 
@@ -369,17 +371,17 @@ class CallGraphBuilder(NodeVisitor):
 			return None
 		
 		string = stdout.decode()
-		input = string.splitlines()
+		inputsplit = string.splitlines()
 
-		output = ''			 # clean input (without linemarkers)
+		output = ''			    # clean input (without linemarkers)
 		outputlineno = 0		# current output line number (clean, no linemarkers)
 		inputlinenooffset = 0   # number of input lines since the last marker
 
 		# coords fetched from the last linemarker
-		lastinputfile = ''	  # input file from the last linemarker
-		lastinputlineno = 0	 # line number from the last linemarker
+		lastinputfile = ''	    # input file from the last linemarker
+		lastinputlineno = 0	    # line number from the last linemarker
 
-		for line in input:
+		for line in inputsplit:
 			if line.startswith('# '):
 				pass
 				inputlinenooffset = -1
@@ -489,16 +491,17 @@ def main():
 	
 		if args.old:
 			old_input = printFileRows(args.old)
-			# old_builder = CallGraphBuilder() # TODO: use this version later
-			old_self, old_ast = builder.preprocess_and_run(old_input, args.old, args.include)
+			old_builder = CallGraphBuilder()
+			old_self, old_ast = old_builder.preprocess_and_run(old_input, args.old, args.include)
+			# old_self, old_ast = builder.preprocess_and_run(old_input, args.old, args.include)
 
 			# print("\nFunction Call Graph (old version):")
 			# for caller, callees in old_call_graph.items():
 			#	 print(f"{caller}: calls -> {', '.join(callees) if callees else 'None'}")
 
 	builder.newvisit = True
-	input = printFileRows(args.input)
-	new_self, new_ast = builder.preprocess_and_run(input, args.input, args.include, args.show_ast)
+	inputfile = printFileRows(args.input)
+	new_self, new_ast = builder.preprocess_and_run(inputfile, args.input, args.include, args.show_ast)
 	new_func_info = None
 
 	if args.old: 
@@ -536,10 +539,11 @@ def main():
 			if new_param_count>old_param_count and new_param_count>0:
 				for i,param in enumerate(new_entry[0]):
 					param_type_new = param 
-					if isinstance(param_type_new,pycparser.c_ast.EllipsisParam):
-							param_type_new = new_param_count = "Variadic"
-					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
 					found = False
+					if isinstance(param_type_new,pycparser.c_ast.EllipsisParam):
+						found = True
+						param_type_new = new_param_count = "Variadic"
+					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
 					while hasattr(param_type_new,'type'):
 						if hasattr(param_type_new.type, "names"): 
 							found = True
@@ -549,14 +553,15 @@ def main():
 							break
 						param_type_new = param_type_new.type
 					if not found:
-						print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+						print(f"name of parameter #{i+1} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
 						continue
 					param_type_old = old_entry[0][i] if i<old_param_count else None
 					if param_type_old is not None:
+						found = False
 						if isinstance(param_type_old,pycparser.c_ast.EllipsisParam):
+							found = True
 							param_type_old = old_param_count = "Variadic"
 						# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
-						found = False
 						while hasattr(param_type_old,'type'):
 							if hasattr(param_type_old.type, "names"):
 								found = True
@@ -566,7 +571,7 @@ def main():
 								break
 							param_type_old = param_type_old.type
 						if not found: 
-							print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+							print(f"name of parameter #{i+1} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
 							continue
 					# list of parameters converted to set because order of modifiers do not matter (e.g. short signed and signed short should be treated the same)
 					if param_type_old is not None and set(param_type_new)!=set(param_type_old): 
@@ -577,9 +582,10 @@ def main():
 			elif old_param_count>1:
 				for i,param in enumerate(old_entry[0]):
 					param_type_old = param
-					if isinstance(param_type_old,pycparser.c_ast.EllipsisParam):
-						param_type_old = old_param_count = "Variadic"
 					found = False
+					if isinstance(param_type_old,pycparser.c_ast.EllipsisParam):
+						found = True
+						param_type_old = old_param_count = "Variadic"
 					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
 					while hasattr(param_type_old,'type'):
 						if hasattr(param_type_old.type, "names"): 
@@ -590,14 +596,15 @@ def main():
 							break
 						param_type_old = param_type_old.type
 					if not found:
-						print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+						print(f"name of parameter #{i+1} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
 						continue
 					param_type_new = new_entry[0][i] if i<new_param_count else None
 					if param_type_new is not None:
+						found = False
 						if isinstance(param_type_new,pycparser.c_ast.EllipsisParam): # TODO: double check if we need any treatment here
+							found = True
 							param_type_new = new_param_count = "Variadic"
 						# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
-						found = False
 						while hasattr(param_type_new,'type'):
 							if hasattr(param_type_new.type, "names"): 
 								found = True
@@ -607,7 +614,7 @@ def main():
 								break
 							param_type_new = param_type_new.type
 						if not found:
-							print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+							print(f"name of parameter #{i+1} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
 							continue
 					if param_type_new is not None and set(param_type_new)!=set(param_type_old): # converted to set because order of modifiers do not matter (e.g. short signed and signed short should be treated the same)
 						line, file = builder.map_line_to_input_file(new_entry[1].line) 
@@ -623,12 +630,12 @@ def main():
 		for name in old_func_names - new_func_names:
 			old_node = old_func_info[name]
 			old_self.removed_funcs.add(name)
-			line, file = builder.map_line_to_input_file(old_node[1].line) 
+			line, file = old_builder.map_line_to_input_file(old_node[1].line) 
 			print(f"Removed function '{name}' from line {line}") # TODO: double check line mapping for old version of the file
 	
 	
-		for name, new_func in builder.funcdefs_new.items():
-			old_func = builder.funcdefs_old.get(name)
+		for name, new_func in builder.funcdefs.items():
+			old_func = old_builder.funcdefs.get(name)
 			if not old_func:
 				builder.new_funcs.add(name)
 				line, file = builder.map_line_to_input_file(new_func.decl.coord.line)
