@@ -8,7 +8,7 @@ from changed_map import file_func_map
 import subprocess
 import os
 
-# TODO: add options for new tag and graphviz output
+# TODO: add option for graphviz output
 
 def get_c_files_excluding(root_dir, exclude_dirs):
     c_files = []
@@ -78,9 +78,8 @@ def main():
             print("Error output:", result.stderr)
         else:
             print("Success!")
-            print("Output:", result.stdout)
+            print("Output:\n", result.stdout)
         changed_list.update(file_func_map) 
-        # print("new map is " + str(changed_list))
 
 
 if __name__ == "__main__":
