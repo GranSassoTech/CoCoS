@@ -102,7 +102,7 @@ def save_change_log(file, new_tag, changed_map, removed_funcs, new_funcs, sig_ch
 
 def extract_func_params(ast):
 	"""
-	Returns a dict mapping function names to number of parameters from a pycparser AST.
+	Returns a dict mapping function names to its parameters, coordinates and return types.
 	"""
 	func_param_map = {}
 
@@ -259,15 +259,15 @@ def save_call_graph_to_dot(call_graph, output_path="callgraph.dot"):
 	"""
 		Takes a function call graph in a map format and converts into a .dot file
 	"""
-	with open(output_path, 'w') as f:
-		f.write("digraph CallGraph {\n")
-		f.write("    node [shape=box];\n")  # optional styling
+	with open(output_path, 'w') as file:
+		file.write("digraph CallGraph {\n")
+		file.write("    node [shape=box];\n")
 
 		for caller, callees in call_graph.items():
 			for callee in callees:
-				f.write(f'    "{caller}" -> "{callee}";\n')
+				file.write(f'    "{caller}" -> "{callee}";\n')
 
-		f.write("}\n")
+		file.write("}\n")
 
 
 class CallGraphBuilder(NodeVisitor):
@@ -499,7 +499,7 @@ def main():
 	builder.newvisit = True
 	input = printFileRows(args.input)
 	new_self, new_ast = builder.preprocess_and_run(input, args.input, args.include, args.show_ast)
-	
+	new_func_info = None
 
 	if args.old: 
 		old_func_info = extract_func_params(old_ast)
@@ -536,34 +536,40 @@ def main():
 			if new_param_count>old_param_count and new_param_count>0:
 				for i,param in enumerate(new_entry[0]):
 					param_type_new = param 
-					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
 					if isinstance(param_type_new,pycparser.c_ast.EllipsisParam):
 							param_type_new = new_param_count = "Variadic"
+					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
+					found = False
 					while hasattr(param_type_new,'type'):
-						# print(" 5555 %s " % (param_type_new))
 						if hasattr(param_type_new.type, "names"): 
+							found = True
 							quals = param_type_new.quals
 							param_type_new = param_type_new.type.names
 							param_type_new[:0] = quals
 							break
 						param_type_new = param_type_new.type
+					if not found:
+						print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+						continue
 					param_type_old = old_entry[0][i] if i<old_param_count else None
 					if param_type_old is not None:
 						if isinstance(param_type_old,pycparser.c_ast.EllipsisParam):
 							param_type_old = old_param_count = "Variadic"
 						# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
-						# found = False
+						found = False
 						while hasattr(param_type_old,'type'):
-							# print(" 5555 %s " % (param_type_old))
 							if hasattr(param_type_old.type, "names"):
-								# found = True
+								found = True
 								quals = param_type_old.quals 
 								param_type_old = param_type_old.type.names
 								param_type_old[:0] = quals 
 								break
-							param_type_old = param_type_old.type # TODO: write an error message in case attribute names is never found (there is a sketch commented out already)
-						# if not found: print("param not found")
-					if param_type_old is not None and set(param_type_new)!=set(param_type_old): # converted to set because order of modifiers do not matter (e.g. short signed and signed short should be treated the same)
+							param_type_old = param_type_old.type
+						if not found: 
+							print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+							continue
+					# list of parameters converted to set because order of modifiers do not matter (e.g. short signed and signed short should be treated the same)
+					if param_type_old is not None and set(param_type_new)!=set(param_type_old): 
 						line, file = builder.map_line_to_input_file(new_entry[1].line) 
 						sig_changes.add(func)
 						print(f"Function '{func}' changed parameters type: parameter #{i+1} was {str(param_type_old)} and now is {str(param_type_new)} (check line {line})")
@@ -573,28 +579,36 @@ def main():
 					param_type_old = param
 					if isinstance(param_type_old,pycparser.c_ast.EllipsisParam):
 						param_type_old = old_param_count = "Variadic"
+					found = False
 					# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
 					while hasattr(param_type_old,'type'):
-						# print(" 5555 %s " % (param_type_new))
 						if hasattr(param_type_old.type, "names"): 
+							found = True
 							quals = param_type_old.quals 
 							param_type_old = param_type_old.type.names
 							param_type_old[:0] = quals
 							break
 						param_type_old = param_type_old.type
+					if not found:
+						print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+						continue
 					param_type_new = new_entry[0][i] if i<new_param_count else None
 					if param_type_new is not None:
 						if isinstance(param_type_new,pycparser.c_ast.EllipsisParam): # TODO: double check if we need any treatment here
 							param_type_new = new_param_count = "Variadic"
 						# if the param is a pointer, it has an extra type field, so we have to dig on types until we eventually find the param name
+						found = False
 						while hasattr(param_type_new,'type'):
-							# print(" 5555 %s " % (param_type_old)) # -D
 							if hasattr(param_type_new.type, "names"): 
+								found = True
 								quals = param_type_new.quals
 								param_type_new = param_type_new.type.names
 								param_type_new[:0] = quals
 								break
 							param_type_new = param_type_new.type
+						if not found:
+							print(f"name of parameter #{i} from function {func} not found, skipping it") # if this message ever shows up, there is something wrong with the while loop above
+							continue
 					if param_type_new is not None and set(param_type_new)!=set(param_type_old): # converted to set because order of modifiers do not matter (e.g. short signed and signed short should be treated the same)
 						line, file = builder.map_line_to_input_file(new_entry[1].line) 
 						sig_changes.add(func)
@@ -633,10 +647,6 @@ def main():
 	if args.graphic: save_call_graph_to_dot(builder.call_graph, args.graphic+".dot") # TODO: refine image (add line numbering, function signature, filename etc.)
 	
 	printed = set()          # to avoid showing the same function twice
-	retest_set = set()       # caller/callee functions that must be retest
-	next_retest_set = set()  # next depth of functions to check
-	depth_up = 0             # how far up in the function call graph we went
-	depth_down = 0           # how far down in the function call graph we went
 	changed_map = {}         # map from files to changed functions
 
 	# retesting output
@@ -647,7 +657,7 @@ def main():
 			print(f + " (changed)")
 			printed.add(f)
 
-			 # Process callers
+			# Process callers
 			printed = process_relations(printed, builder.call_graph, f, 'callers', args.caller_depth)
 	
 			# Process callees
@@ -659,7 +669,6 @@ def main():
 		print("\n--- no functions changed ---")
 
 	if args.new_tag:
-		# print("Saving log\n")
 		save_change_log(args.input, args.new_tag, changed_map, old_self.removed_funcs, new_self.new_funcs, sig_changes)
 
 
