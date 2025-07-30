@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
 
+""" CoCoS - Continuous Compliance Service
+	Macro script to run over a whole git directory
+	
+Author:
+	Emerson Sales
+
+Assumptions:
+	- We are relying on the fact that CoCoS is installed in the git root. 
+	  This means that all analyzed files start with ../ 
+	  and thus, if we want to retrieve a file path, we remove the first three characters of the input name
+	- This script is called by run.sh, who is responsible for other preparations before running the analysis,
+      therefore this script is not supposed to be called directly by the user
+	
+ToDos:
+	- clean changed_map and file_line_map before (or after) every run
+    - add option for graphviz output
+"""
+
 import argparse
 import glob
 from pathlib import Path
@@ -8,7 +26,6 @@ from changed_map import file_func_map
 import subprocess
 import os
 
-# TODO: add option for graphviz output
 
 def get_c_files_excluding(root_dir, exclude_dirs):
     c_files = []
