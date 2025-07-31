@@ -232,7 +232,6 @@ def printFileRows(filename):
 	return rows
 
 
-# TODO: use this version when refactoring list of retesting functions
 def get_related_functions(call_graph, roots, max_depth, direction='callees'):
 	"""
 	Get either callers or callees of given roots in a call graph up to max_depth.
@@ -488,16 +487,10 @@ def main():
 			lib_funcs = {str(x.strip()) for x in functions.split(",") if x.strip()}
 			builder.changed_func.update(lib_funcs)
 	
-	
 		if args.old:
 			old_input = printFileRows(args.old)
 			old_builder = CallGraphBuilder()
 			old_self, old_ast = old_builder.preprocess_and_run(old_input, args.old, args.include)
-			# old_self, old_ast = builder.preprocess_and_run(old_input, args.old, args.include)
-
-			# print("\nFunction Call Graph (old version):")
-			# for caller, callees in old_call_graph.items():
-			#	 print(f"{caller}: calls -> {', '.join(callees) if callees else 'None'}")
 
 	builder.newvisit = True
 	inputfile = printFileRows(args.input)
@@ -513,7 +506,6 @@ def main():
 		funcs_in_both = old_func_names.intersection(new_func_names)
 
 		for func in funcs_in_both:
-			# print("function is "+str(func))
 
 			# entry is a tuple [[params node], coordinates, [return types]]
 			old_entry = old_func_info.get(func) 
@@ -530,7 +522,6 @@ def main():
 			# return type of the function
 			old_ret_type = old_entry[2]
 			new_ret_type = new_entry[2]
-
 
 			if old_ret_type != new_ret_type:
 				line, file = builder.map_line_to_input_file(new_entry[1].line)
@@ -631,7 +622,7 @@ def main():
 			old_node = old_func_info[name]
 			old_self.removed_funcs.add(name)
 			line, file = old_builder.map_line_to_input_file(old_node[1].line) 
-			print(f"Removed function '{name}' from line {line}") # TODO: double check line mapping for old version of the file
+			print(f"Removed function '{name}' from line {line}")
 	
 	
 		for name, new_func in builder.funcdefs.items():
@@ -641,13 +632,11 @@ def main():
 				line, file = builder.map_line_to_input_file(new_func.decl.coord.line)
 				print(f"Function '{name}' is new (declared at line {line})")
 			else:
-				# print(f"Matched function '{name}' at lines {old_func.decl.coord.line} (old) and {new_func.decl.coord.line} (new)")
 				if not ast_equal(old_func, new_func):
 					builder.changed_func.add(name)
 					line, file = builder.map_line_to_input_file(new_func.decl.coord.line)
 					print(f"Function '{name}' has changed (check line {line})")
 	
-	# print(self.changed_func)
 	print("\n--- Functions map:")
 	for caller, callees in builder.call_graph.items():
 		print(f"{caller} calls: {', '.join(callees)}")
