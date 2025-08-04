@@ -24,7 +24,7 @@ ToDos:
 	- General refactoring (many parts of the code can be converted into functions, 
 	  specially the ones that repeat twice with different parameters)
 	- Debug mode
-	- Add option to show version and exit
+	- Call graph should have more information (function signature, line map, origin file)
 """
 import argparse
 import ast
@@ -458,7 +458,7 @@ def process_relations(printed, call_graph, f, direction, depth_arg):
 
 
 def main():
-	parser = argparse.ArgumentParser(description="Build a function call graph from a C file, check which functions must be retested")
+	parser = argparse.ArgumentParser(description="CoCoS - Continuous Compliance Service - Change Impact Analysis Tool")
 	parser.add_argument("input", help="Input C source file")
 	parser.add_argument("-o", "--old", help="Old version of the C file")
 	parser.add_argument("-l", "--lines", help="Comma-separated list of changed lines", default="")
@@ -469,6 +469,7 @@ def main():
 	parser.add_argument("-g", "--graphic", help="save function call graph in a .dot file", default="")
 	parser.add_argument("-n", "--new-tag", help="save change log for new release tag", default="")
 	parser.add_argument("-I", "--include", help="include paths", default="")
+	parser.add_argument("-v", "--version", action="version", version=VERSION)
 	args = parser.parse_args()
 
 	sig_changes = set()
