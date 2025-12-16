@@ -42,7 +42,7 @@ run.sh            Main script (performs full run)
 
 3) Certify that all scripts have execution permissions (+x):
 
-   chmod +x run.sh copyrepo.sh run.py extractlines.py cocos.py diffsitter
+   chmod +x run.sh copyrepos.sh run.py extractlines.py cocos.py diffsitter
 
 
 4) Move shell scripts (copyrepo.sh and run.sh) to the root of git repository:
