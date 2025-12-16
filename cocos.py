@@ -36,7 +36,7 @@ import subprocess
 
 import pycparser
 import pycparser.c_ast
-from pycparserext.ext_c_parser import FuncDeclExt, GnuCParser # TODO: check if we really need these, otherwise we can drop pycparserext and use just pycparser
+from pycparserext.ext_c_parser import FuncDeclExt, GnuCParser 
 from pycparser.c_ast import NodeVisitor, ID, FuncDef, FuncCall
 
 
@@ -400,7 +400,7 @@ class CallGraphBuilder(NodeVisitor):
 		parser = GnuCParser()
 		ast = parser.parse(self.output)
 		if showast: 
-			ast.show()
+			ast.show(attrnames=True,nodenames=True,showcoord=False)
 			exit()
 		self.visit(ast)
 		return self, ast
@@ -469,6 +469,9 @@ def main():
 	parser.add_argument("-g", "--graphic", help="save function call graph in a .dot file", default="")
 	parser.add_argument("-n", "--new-tag", help="save change log for new release tag", default="")
 	parser.add_argument("-I", "--include", help="include paths", default="")
+	parser.add_argument("-m", "--macro", help="add macros for precompilation", default="")
+	parser.add_argument("-M", "--macro-file", help="add a file to be read containing all the macros for precompilation", default="")
+	parser.add_argument("-d", "--verbosity", help="set verbosity level", default="4")
 	parser.add_argument("-v", "--version", action="version", version=VERSION)
 	args = parser.parse_args()
 
@@ -476,6 +479,8 @@ def main():
 	
 	builder = CallGraphBuilder()
 	builder.inputfile = args.input
+	old_self, old_ast = None, None
+	new_self, new_ast = None, None
 	
 	if not args.show_ast:
 		lib_funcs = set()
@@ -491,11 +496,15 @@ def main():
 		if args.old:
 			old_input = printFileRows(args.old)
 			old_builder = CallGraphBuilder()
-			old_self, old_ast = old_builder.preprocess_and_run(old_input, args.old, args.include)
+			result = builder.preprocess_and_run(old_input, args.old, args.include)
+			if result:
+				old_self, old_ast = result
 
 	builder.newvisit = True
 	inputfile = printFileRows(args.input)
-	new_self, new_ast = builder.preprocess_and_run(inputfile, args.input, args.include, args.show_ast)
+	result = builder.preprocess_and_run(input, args.input, args.include, args.show_ast)
+	if result:
+		new_self, new_ast = result
 	new_func_info = None
 
 	if args.old: 
@@ -665,7 +674,7 @@ def main():
 	else:
 		print("\n--- no functions changed ---")
 
-	if args.new_tag:
+	if args.new_tag and old_self is not None and new_self is not None:
 		save_change_log(args.input, args.new_tag, changed_map, old_self.removed_funcs, new_self.new_funcs, sig_changes)
 
 
