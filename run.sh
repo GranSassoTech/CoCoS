@@ -6,19 +6,27 @@ TOOL="cocos-only"
 DEBUG=0
 NEWTAG=""
 INCLUDEPATHS="include"
+VERBOSITY="4"
+REPOS_DIR="repos"
+MACROS=""
+MACRO_FILE=""
 
 # Parse options
-while getopts "t:Dn:I:" opt; do
+while getopts "t:Dn:I:d:r:m:M:" opt; do
   case $opt in
     t) TOOL=$OPTARG ;;
     D) DEBUG=1 ;;
     n) NEWTAG=$OPTARG ;;
     I) INCLUDEPATHS=$OPTARG ;;
-    *) echo "Usage: $0 [-t TOOL] [-D] [-n NEWTAG] <commit1> [<commit2>]"; exit 1 ;;
+    m) MACROS=$OPTARG ;;
+    M) MACRO_FILE=$OPTARG;;
+    d) VERBOSITY=$OPTARG ;;
+    r) REPOS_DIR=$OPTARG ;;
+    *) echo "Usage: $0 [-t TOOL] [-D] [-n NEWTAG] [-m MACRO_INLINE] [-M MACRO_FILE] [-d VERBOSITY_LEVEL] [-r REPOS_DIR] <commit1> [<commit2>]"; exit 1 ;;
   esac
 done
 
-# Shift away parsed options; remaining are commit hashes
+# Shift away parsed options; remaining are commits
 shift $((OPTIND - 1))
 COMMIT1=$1
 COMMIT2=$2
@@ -32,72 +40,70 @@ debug_echo() {
 
 # Validate input
 if [ -z "$COMMIT1" ]; then
-  echo "Error: At least one commit hash must be provided."
+  echo "Error: At least one commit must be provided."
   echo "Usage: $0 [-t TOOL] [-D] <commit1> [<commit2>]"
   exit 1
 fi
 
-# remove data from previous run
-debug_echo "data cleanup start"
-rm -f CoCoS/changedlines.txt # TODO: remove changed_map.py and file_line_map.py too, but first change run.py script
-debug_echo "data cleanup finish"
-
-debug_echo "copying old version of the repository from commit $COMMIT1"
-# Modified to conditionally pass COMMIT2
-if [ -z "$COMMIT2" ]; then
-  bash copyrepos.sh "$COMMIT1"
-else
-  debug_echo "copying new version of the repository from commit $COMMIT2"
-  bash copyrepos.sh "$COMMIT1" "$COMMIT2"
-  debug_echo "copy of $COMMIT2 sucessfully stored at tmp/new/"
-fi
-debug_echo "copy of $COMMIT1 sucessfully stored at tmp/old/"
-
-debug_echo "Tool selected: $TOOL"
-debug_echo "Comparing: $COMMIT1 and ${COMMIT2:-(working directory)}"
-
-# Behavior logic
-if [ "$TOOL" = "git" ]; then
-  if [ -z "$COMMIT2" ]; then
-    git diff -U0 "$COMMIT1" -- '*.c' \
-      | grep '^@@' \
-      | sed -E 's/^@@.*\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(.*/\1/' \
-      | uniq
-  else
-    git diff -U0 "$COMMIT1" "$COMMIT2" -- '*.c' \
-      | grep '^@@' \
-      | sed -E 's/^@@.*\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(.*/\1/' \
-      | uniq
+# Iterate over repositories
+for repo in "$REPOS_DIR"/*; do
+  if [ ! -d "$repo/.git" ]; then
+    continue
   fi
 
-elif [ "$TOOL" != "cocos-only" ]; then
+  REPO_NAME=$(basename "$repo")
+  debug_echo "Processing repository: $REPO_NAME"
+
+  TMP_REPO_DIR="tmp/$REPO_NAME"
+  rm -rf "$TMP_REPO_DIR"
+  mkdir -p "$TMP_REPO_DIR"
+
+  debug_echo "Copying repository versions"
+
   if [ -z "$COMMIT2" ]; then
-    git difftool -t "$TOOL" "$COMMIT1" -- */*.c *.c > CoCoS/changedlines.txt
+    bash copyrepos.sh "$repo" "$COMMIT1" "$TMP_REPO_DIR"
   else
-    git difftool -t "$TOOL" "$COMMIT1" "$COMMIT2" */*.c *.c > CoCoS/changedlines.txt
+    bash copyrepos.sh "$repo" "$COMMIT1" "$COMMIT2" "$TMP_REPO_DIR"
   fi
-  debug_echo "Semantic diff saved in changedlines.txt"
-else
-  debug_echo "Skipping external diffs (tool = cocos-only)"
-fi
 
-# Change directory to CoCoS
-cd CoCoS || { echo "CoCoS directory not found"; exit 1; }
+  # External diff (optional)
+  if [ "$TOOL" != "cocos-only" ]; then
+    if [ -z "$COMMIT2" ]; then
+      git -C "$repo" difftool -t "$TOOL" "$COMMIT1" -- '*.c' \
+        > "CoCoS/changedlines_${REPO_NAME}.txt"
+    else
+      git -C "$repo" difftool -t "$TOOL" "$COMMIT1" "$COMMIT2" -- '*.c' \
+        > "CoCoS/changedlines_${REPO_NAME}.txt"
+    fi
+  fi
 
-# Extract line changes only if changedlines.txt exists
-if [ -f changedlines.txt ]; then
-  debug_echo "Mapping changed lines into files"
-  python3 extractlines.py changedlines.txt -t $TOOL
-  debug_echo "File to changed lines mapping saved"
-else
-#   python3 extractlines.py changedlines.txt -t skip
-  debug_echo "No changedlines.txt file found — skipping line extraction"
-fi
+  # cd CoCoS
 
+  if [ -f "changedlines_${REPO_NAME}.txt" ]; then
+    python3 extractlines.py "changedlines_${REPO_NAME}.txt" -t "$TOOL" --repo "$REPO_NAME"
+  fi
 
-# Run the analysis
-if [ -z "$COMMIT2" ]; then
-  python3 run.py $NEWTAG -I $INCLUDEPATHS --current
-else
-  python3 run.py $NEWTAG -I $INCLUDEPATHS
-fi
+  MACRO_ARGS=()
+
+  if [ -n "$MACROS" ]; then
+    MACRO_ARGS+=("-m" "$MACROS")
+  fi
+
+  if [ -n "$MACROFILE" ]; then
+    MACRO_ARGS+=("-M" "$MACROFILE")
+  fi
+
+  TAG_ARGS=()
+
+  if [ -n "$NEWTAG" ]; then
+    TAG_ARGS+=("-n" "$NEWTAG")
+  fi
+
+  if [ -z "$COMMIT2" ]; then
+    python3 run.py --repo "$REPO_NAME" "${TAG_ARGS[@]}" -I "$INCLUDEPATHS" -d "$VERBOSITY" "${MACRO_ARGS[@]}" --current
+  else
+    python3 run.py --repo "$REPO_NAME" "${TAG_ARGS[@]}" -I "$INCLUDEPATHS" -d "$VERBOSITY" "${MACRO_ARGS[@]}"
+  fi
+
+  # cd ..
+done

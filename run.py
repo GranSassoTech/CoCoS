@@ -1,105 +1,165 @@
 #!/usr/bin/env python3
 
 """ CoCoS - Continuous Compliance Service
-	Macro script to run over a whole git directory
-	
+    Macro script to run over multiple git repositories
+    
 Author:
-	Emerson Sales
+    Emerson Sales
 
 Assumptions:
-	- We are relying on the fact that CoCoS is installed in the git root. 
-	  This means that all analyzed files start with ../ 
-	  and thus, if we want to retrieve a file path, we remove the first three characters of the input name
-	- This script is called by run.sh, who is responsible for other preparations before running the analysis,
+    - We are relying on the fact that git repositories are all inside the same folder 
+      (i.e. each subfolder of --repo option is a git repository)
+    - This script is called by run.sh, who is responsible for other preparations before running the analysis,
       therefore this script is not supposed to be called directly by the user
-	
+    
 ToDos:
-	- clean changed_map and file_line_map before (or after) every run
+    - clean changed_map and file_line_map before (or after) every run
     - add option for graphviz output
 """
 
 import argparse
-import glob
-from pathlib import Path
-from file_line_map import file_line_map
-from changed_map import file_func_map
-import subprocess
 import os
+import subprocess
+import sys
+from collections import defaultdict
 
 
-def get_c_files_excluding(root_dir, exclude_dirs):
+def get_c_files_excluding(root, exclude_dirs):
+    """
+    Collect all .c files under `root`, excluding any directory listed in exclude_dirs.
+    """
     c_files = []
-    for dirpath, dirnames, filenames in os.walk(root_dir):
-        # Modify dirnames in-place to skip excluded directories
-        dirnames[:] = [d for d in dirnames if os.path.join(dirpath, d) not in exclude_dirs]
-        for file in filenames:
-            if file.endswith(".c"):
-                c_files.append(os.path.join(dirpath, file))
+    for dirpath, dirnames, filenames in os.walk(root):
+        # prune excluded directories
+        dirnames[:] = [
+            d for d in dirnames
+            if not any(os.path.abspath(os.path.join(dirpath, d)).startswith(
+                os.path.abspath(ex))
+                for ex in exclude_dirs)
+        ]
+        for f in filenames:
+            if f.endswith(".c"):
+                c_files.append(os.path.join(dirpath, f))
     return c_files
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Run CoCoS algorithm in multiple files")
-    parser.add_argument("newtag", help="release number", default="")
-    parser.add_argument("-C", "--current", action='store_true', help="compare to current working directory")
-    parser.add_argument("-I", "--include", help="include paths", default="")
+    parser = argparse.ArgumentParser(
+        description="Run CoCoS on a repository and collect changed functions"
+    )
+    parser.add_argument(
+        "-n", "--newtag",
+        default="",
+        help="Release/tag identifier for the new version"
+    )
+    parser.add_argument(
+        "-C", "--current",
+        action="store_true",
+        help="Compare against the current working tree instead of tmp copies"
+    )
+    parser.add_argument(
+        "--repo",
+        required=True,
+        help="Repositories folder"
+    )
+    parser.add_argument(
+        "-I", "--include",
+        help="Additional include paths (passed through to cocos.py)",
+        default=""
+    )
+    parser.add_argument(
+        "-d", "--verbosity",
+        help="Verbosity level",
+        default="4"
+    )
+    parser.add_argument(
+        "-m", "--macros",
+        help="Additional macros (inlined) for gcc precompilation",
+        default=""
+    )
+    parser.add_argument(
+        "-M", "--macrofile",
+        help="Additional macros (inlined) for gcc precompilation",
+        default=""
+    )
+
     args = parser.parse_args()
-    changed_list = {}
 
-    exclude = ["../CoCoS", "../tmp"] if args.current else ["../CoCoS", "../tmp/old"]
-    include = ".." if args.current else "../tmp/new"
-    files = get_c_files_excluding(include, exclude)
-    print("C files are " + str(files))
-    # organize files from subfolders to root
-    sorted_files = sorted(files, key=lambda s: s.count('/'), reverse=True)
-    for file in sorted_files:
-        print("\nAnalyzing file: " + file[3:])
-        lib_funcs = []
-        lines = ""
-        # print("line set is "+str(j))
-        if file[3:] in file_line_map.keys():
-            lines = ",".join(str(lineno) for lineno in sorted(file_line_map[file[3:]]))
-        # print("lines are:" + lines)
-        # TODO: check .cocos_change_log to populate lib_funcs
-        # if changed_list:
-        #     # print("running cflow to check dependencies")
-        #     lib_files = glob.glob("../lib/*.c")
-        #     # TODO: remove cflow dependency
-        #     cmd = ["cflow", str(file)] + lib_files
-        #     cflowoutput = subprocess.run(cmd, capture_output=True, text=True)
-        #     cflowlines = cflowoutput.stdout.splitlines()
-        #     # print("cflow output is\n" + cflowoutput.stdout)
-        #     for k in cflowlines:
-        #         for l in changed_list.keys():
-        #             f = k[:k.find("(")].strip() 
-        #             # print("checking if "+l+" is in "+k)
-        #             # print("f is "+f)
-        #             if l in k and f in changed_list[l]:
-        #                 lib_funcs.append(f) 
-        #                 # print("lib_funcs is now " + str(lib_funcs))
-        funcs = ",".join(str(k) for k in sorted(lib_funcs)) if lib_funcs else ""
-        cmdline = ["python3", "cocos.py", str(file)]
+    repo = args.repo
+    repo_root = os.path.join("repos", repo)
+    tmp_root = os.path.join("tmp", repo)
+    tmp_old_root = os.path.join(tmp_root, "old")
+    tmp_new_root = os.path.join(tmp_root, "new")
 
-        # Check if file exists in previous version before adding --old option
-        old_file_path = "../tmp/old/" + str(file[3:])
-        if os.path.isfile(old_file_path): cmdline += ["--old", old_file_path]
-        if lines: cmdline += ["--lines", str(lines)] 
-        if funcs: cmdline += ["--functions", funcs]
-        if args.newtag: cmdline += ["--new-tag", args.newtag]
-        if args.include: cmdline += ["-I", args.include]
+    if not os.path.isdir(repo_root):
+        print(f"Error: repository '{repo_root}' does not exist", file=sys.stderr)
+        sys.exit(1)
 
-        print(f"running command {" ".join(cmdline)}")
+    # Where we read files from
+    if args.current:
+        include_root = repo_root
+        exclude_dirs = [os.path.abspath("CoCoS"), os.path.abspath(tmp_root)]
+    else:
+        include_root = tmp_new_root
+        exclude_dirs = [os.path.abspath("CoCoS")]
 
-        result = subprocess.run(cmdline, capture_output=True, text=True)
-        if result.returncode != 0:
-            print("Error occurred!")
-            print("Error output:", result.stderr)
+    files = get_c_files_excluding(include_root, exclude_dirs)
+    print("C files are:", files)
+
+    # Sort deeper paths first (matches previous behavior)
+    files.sort(key=lambda s: s.count(os.sep), reverse=True)
+
+    changed_list = defaultdict(set)
+
+    for file_path in files:
+        # Compute path relative to repository root
+        if args.current:
+            relative_path = os.path.relpath(file_path, repo_root)
         else:
-            print("Success!")
-            print("Output:\n", result.stdout)
-        changed_list.update(file_func_map) 
+            relative_path = os.path.relpath(file_path, tmp_new_root)
+
+        logical_path = os.path.join(repo_root, relative_path)
+
+        print("\nAnalyzing file:", logical_path)
+
+        cmdline = ["python3", "cocos.py", logical_path]
+
+        # Old file, if it exists
+        old_file_path = os.path.join(tmp_old_root, relative_path)
+        if os.path.isfile(old_file_path):
+            cmdline += ["--old", old_file_path]
+
+        if args.newtag:
+            cmdline += ["--new-tag", args.newtag]
+
+        if args.include:
+            cmdline += ["-I", args.include]
+
+        if args.macros:
+            cmdline += ["-m", args.macros]
+
+        if args.macrofile:
+            cmdline += ["-M", args.macrofile]
+
+        if args.verbosity:
+            cmdline += ["-d", args.verbosity]
+
+        # print("Running:", " ".join(cmdline))
+
+        result = subprocess.run(
+            cmdline,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            print("Error running cocos.py:")
+            print(result.stderr)
+            continue
+
+        print("Output:\n", result.stdout)
+
 
 
 if __name__ == "__main__":
     main()
-    file_func_map.clear()
-

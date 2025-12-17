@@ -39,6 +39,23 @@ import pycparser.c_ast
 from pycparserext.ext_c_parser import FuncDeclExt, GnuCParser 
 from pycparser.c_ast import NodeVisitor, ID, FuncDef, FuncCall
 
+def parse_macros(macro_string, macro_file):
+	macros = []
+
+	if macro_string:
+		for m in macro_string.split(","):
+			m = m.strip()
+			if m:
+				macros.append(f"-D{m}")
+
+	if macro_file and os.path.isfile(macro_file):
+		with open(macro_file) as f:
+			for line in f:
+				line = line.strip()
+				if line and not line.startswith("#"):
+					macros.append(f"-D{line}")
+
+	return " ".join(macros)
 
 
 def save_dict_as_python_file(data, output_path, var_name="file_func_map"):
@@ -341,37 +358,53 @@ class CallGraphBuilder(NodeVisitor):
 
 
 	# adapted from CSeq (core.Merger)
-	def preprocess_and_run(self, inputfile, filepath, includepaths, showast=False): # TODO: split this functions in two
+	def preprocess_and_run(self, inputfile, filepath, includepaths, macros="", showast=False): # TODO: split this functions in two
 		
-		includestring = ' -I%s' % os.path.dirname(__file__)+'/include' # include fake headers first
+		includestring = ' -I%s' % os.path.dirname(__file__)+'include' # include fake headers first
+
+		# repo_root = os.path.dirname(filepath)
+		# print("repo root is ",repo_root)
+		# while not os.path.isdir(os.path.join(repo_root, ".git")):
+		#     print("repo root is ",repo_root)
+		#     parent = os.path.dirname(repo_root)
+		#     if parent == repo_root:
+		#         break
+		#     repo_root = parent
+
+		# includestring += f" -I{repo_root}"
+
 
 		# TODO: the whole following block is experimental
 		includepaths = {str(x.strip()) for x in includepaths.split(",") if x.strip()}
 		for include in includepaths:
-			includestring += ' -I../%s' % include
-		includestring += ' -I../src/lib '
-		includestring += ' -I../src/lib/include '
-		includestring += ' -I../Include '
+			includestring += ' -I./repos/%s' % include
+		# includestring += ' -I../src/lib '
+		# includestring += ' -I../src/lib/include '
+		# includestring += ' -I../Include '
 		# end block
 		
 		localincludepath = filepath[:filepath.rfind('/')] if '/' in filepath else ''
 
 		if localincludepath!='': includestring += ' -I%s' % localincludepath
 		
-		macros = "-D'__attribute__(x)=' -D'__extension__(x)=' -D'__volatile__='"
+		base_macros = "-D'__attribute__(x)=' -D'__extension__(x)=' -D'__volatile__='"
+		user_macros = macros or ""
+		all_macros = f"{base_macros} {user_macros}"
 
 		# Note: must use gcc
-		cmdline = 'gcc %s -nostdinc %s -E -' % (macros,includestring) # hyphen at the end forces input from stdin
+		cmdline = f"gcc {all_macros} -nostdinc {includestring} -E -" # hyphen at the end forces input from stdin
+		# print("Running ",cmdline)
 		p = subprocess.Popen(shlex.split(cmdline), stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 		stdout, stderr = p.communicate(input=inputfile.encode())
-
-		if stderr:
-			print("Preprocessing error:\n", stderr.decode())
+		# print("stdout is ",stdout)
+		if p.returncode != 0:
+			print("Preprocessing failed:\n", stderr.decode())
 			return None
+
 		
 		string = stdout.decode()
 		inputsplit = string.splitlines()
-
+		# print("String is ",string)
 		output = ''			    # clean input (without linemarkers)
 		outputlineno = 0		# current output line number (clean, no linemarkers)
 		inputlinenooffset = 0   # number of input lines since the last marker
@@ -396,6 +429,8 @@ class CallGraphBuilder(NodeVisitor):
 		self.markedoutput = string
 		self.output = output
 		self.lastoutputlineno = outputlineno
+
+		# print("Output is \n", output)
 
 		parser = GnuCParser()
 		ast = parser.parse(self.output)
@@ -496,13 +531,15 @@ def main():
 		if args.old:
 			old_input = printFileRows(args.old)
 			old_builder = CallGraphBuilder()
-			result = builder.preprocess_and_run(old_input, args.old, args.include)
+			macro_flags = parse_macros(args.macro, args.macro_file)
+			result = builder.preprocess_and_run(old_input, args.old, args.include, macro_flags)
 			if result:
 				old_self, old_ast = result
 
 	builder.newvisit = True
 	inputfile = printFileRows(args.input)
-	result = builder.preprocess_and_run(input, args.input, args.include, args.show_ast)
+	macro_flags = parse_macros(args.macro, args.macro_file)
+	result = builder.preprocess_and_run(inputfile, args.input, args.include, macro_flags, args.show_ast)
 	if result:
 		new_self, new_ast = result
 	new_func_info = None
@@ -647,13 +684,16 @@ def main():
 					line, file = builder.map_line_to_input_file(new_func.decl.coord.line)
 					print(f"Function '{name}' has changed (check line {line})")
 	
-	print("\n--- Functions map:")
-	for caller, callees in builder.call_graph.items():
-		print(f"{caller} calls: {', '.join(callees)}")
+	verbosity = int(args.verbosity)
+	if verbosity > 3:
+		print("\n--- Functions map:")
+		for caller, callees in builder.call_graph.items():
+			print(f"{caller} calls: {', '.join(callees)}")
 	if args.graphic: save_call_graph_to_dot(builder.call_graph, args.graphic+".dot") # TODO: refine image (add line numbering, function signature, filename etc.)
 	
 	printed = set()          # to avoid showing the same function twice
 	changed_map = {}         # map from files to changed functions
+
 
 	# retesting output
 	if builder.changed_func: # TODO: check if this condition is necessary and sufficient to show the retesting output
@@ -664,10 +704,10 @@ def main():
 			printed.add(f)
 
 			# Process callers
-			printed = process_relations(printed, builder.call_graph, f, 'callers', args.caller_depth)
+			printed = process_relations(printed, builder.call_graph, f, 'callers', args.caller_depth) if verbosity > 1 else printed
 	
 			# Process callees
-			printed = process_relations(printed, builder.call_graph, f, 'callees', args.callee_depth)
+			printed = process_relations(printed, builder.call_graph, f, 'callees', args.callee_depth) if verbosity > 2 else printed
 
 		changed_map[builder.inputfile] = builder.changed_func
 		save_dict_as_python_file(changed_map, "changed_map.py")
