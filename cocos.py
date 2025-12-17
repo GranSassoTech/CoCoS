@@ -532,7 +532,7 @@ def main():
 			old_input = printFileRows(args.old)
 			old_builder = CallGraphBuilder()
 			macro_flags = parse_macros(args.macros, args.macro_file)
-			result = builder.preprocess_and_run(old_input, args.old, args.include, macro_flags)
+			result = old_builder.preprocess_and_run(old_input, args.old, args.include, macro_flags)
 			if result:
 				old_self, old_ast = result
 

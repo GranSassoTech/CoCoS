@@ -26,10 +26,6 @@ while getopts "t:Dn:I:d:r:m:M:" opt; do
   esac
 done
 
-echo "DEBUG:"
-echo "MACROS=[$MACROS]"
-echo "MACROFILE=[$MACROFILE]"
-
 # Shift away parsed options; remaining are commits
 shift $((OPTIND - 1))
 COMMIT1=$1
