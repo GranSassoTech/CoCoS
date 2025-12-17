@@ -136,7 +136,7 @@ def main():
             cmdline += ["-I", args.include]
 
         if args.macros:
-            cmdline += ["-m", args.macros]
+            cmdline += ["--macros="+args.macros]
 
         if args.macrofile:
             cmdline += ["-M", args.macrofile]

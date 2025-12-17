@@ -46,7 +46,7 @@ def parse_macros(macro_string, macro_file):
 		for m in macro_string.split(","):
 			m = m.strip()
 			if m:
-				macros.append(f"-D{m}")
+				macros.append(f"{m}")
 
 	if macro_file and os.path.isfile(macro_file):
 		with open(macro_file) as f:
@@ -504,7 +504,7 @@ def main():
 	parser.add_argument("-g", "--graphic", help="save function call graph in a .dot file", default="")
 	parser.add_argument("-n", "--new-tag", help="save change log for new release tag", default="")
 	parser.add_argument("-I", "--include", help="include paths", default="")
-	parser.add_argument("-m", "--macro", help="add macros for precompilation", default="")
+	parser.add_argument("-m", "--macros", help="add macros for precompilation", default="")
 	parser.add_argument("-M", "--macro-file", help="add a file to be read containing all the macros for precompilation", default="")
 	parser.add_argument("-d", "--verbosity", help="set verbosity level", default="4")
 	parser.add_argument("-v", "--version", action="version", version=VERSION)
@@ -531,14 +531,14 @@ def main():
 		if args.old:
 			old_input = printFileRows(args.old)
 			old_builder = CallGraphBuilder()
-			macro_flags = parse_macros(args.macro, args.macro_file)
+			macro_flags = parse_macros(args.macros, args.macro_file)
 			result = builder.preprocess_and_run(old_input, args.old, args.include, macro_flags)
 			if result:
 				old_self, old_ast = result
 
 	builder.newvisit = True
 	inputfile = printFileRows(args.input)
-	macro_flags = parse_macros(args.macro, args.macro_file)
+	macro_flags = parse_macros(args.macros, args.macro_file)
 	result = builder.preprocess_and_run(inputfile, args.input, args.include, macro_flags, args.show_ast)
 	if result:
 		new_self, new_ast = result

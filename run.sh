@@ -26,6 +26,10 @@ while getopts "t:Dn:I:d:r:m:M:" opt; do
   esac
 done
 
+echo "DEBUG:"
+echo "MACROS=[$MACROS]"
+echo "MACROFILE=[$MACROFILE]"
+
 # Shift away parsed options; remaining are commits
 shift $((OPTIND - 1))
 COMMIT1=$1
@@ -86,7 +90,7 @@ for repo in "$REPOS_DIR"/*; do
   MACRO_ARGS=()
 
   if [ -n "$MACROS" ]; then
-    MACRO_ARGS+=("-m" "$MACROS")
+    MACRO_ARGS+=("--macros=""$MACROS")
   fi
 
   if [ -n "$MACROFILE" ]; then
