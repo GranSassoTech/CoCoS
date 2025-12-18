@@ -387,7 +387,7 @@ class CallGraphBuilder(NodeVisitor):
 
 		if localincludepath!='': includestring += ' -I%s' % localincludepath
 		
-		base_macros = "-D'__attribute__(x)=' -D'__extension__(x)=' -D'__volatile__='"
+		base_macros = "-D'__attribute__(x)=' -D'__extension__(x)=' -D'__volatile__=' -D'__asm__(...)=' -D'asm(...)=' -D'__asm(...)='"
 		user_macros = macros or ""
 		all_macros = f"{base_macros} {user_macros}"
 

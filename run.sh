@@ -41,7 +41,7 @@ debug_echo() {
 # Validate input
 if [ -z "$COMMIT1" ]; then
   echo "Error: At least one commit must be provided."
-  echo "Usage: $0 [-t TOOL] [-D] <commit1> [<commit2>]"
+  echo "Usage: $0 [-t DIFF_TOOL] [-D] [-n NEW_TAG] [-I INCLUDE_PATHS] [-m MACRO_DEFS] [-M MACRO_FILE] [-d VERBOSITY_LEVEL] [-r REPOS_DIR] <commit1> [<commit2>]"
   exit 1
 fi
 
