@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-VERSION = 'CoCoS-0.1-2025.07.30'
+VERSION = 'CoCoS-0.2-2025.12.18'
 
 """ CoCoS - Continuous Compliance Service
 	File analysis script
