@@ -87,7 +87,7 @@ def main():
 
     repo = args.repo
     repo_root = os.path.join("repos", repo)
-    tmp_root = os.path.join("tmp", repo)
+    tmp_root = os.path.join(os.path.dirname(repo_root), "tmp", repo)
     tmp_old_root = os.path.join(tmp_root, "old")
     tmp_new_root = os.path.join(tmp_root, "new")
 
